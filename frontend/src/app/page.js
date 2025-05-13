@@ -2,6 +2,15 @@
 import { useState } from "react";
 import axios from "axios";
 import { create, all } from "mathjs";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ResponsiveContainer,
+} from "recharts";
 
 const math = create(all);
 
@@ -12,8 +21,11 @@ export default function Home() {
     z_imag: "",
   });
   const [result, setResult] = useState(null);
+  const [sparams, setSparams] = useState(null); // State for S-parameters
+  const [prediction, setPrediction] = useState(null); // State for prediction
   const [clickedPoint, setClickedPoint] = useState(null);
   const [gammaPath, setGammaPath] = useState([]);
+  const [sweepData, setSweepData] = useState([]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -26,6 +38,7 @@ export default function Home() {
     }
 
     try {
+      // Fetch matching results
       const res = await axios.post("http://127.0.0.1:8000/match", {
         frequency: parseFloat(form.frequency),
         z_real: parseFloat(form.z_real),
@@ -33,9 +46,55 @@ export default function Home() {
       });
       setResult(res.data);
       setGammaPath(res.data.gamma_path);
+
+      // Fetch S-parameters
+      const sparamsRes = await axios.post("http://127.0.0.1:8000/sparams", {
+        frequency: parseFloat(form.frequency),
+        z_real: parseFloat(form.z_real),
+        z_imag: parseFloat(form.z_imag),
+      });
+      setSparams(sparamsRes.data);
     } catch (err) {
       console.error(err);
       setResult({ error: "Something went wrong. Please check your input." });
+    }
+  };
+
+  const handlePredict = async () => {
+    if (!form.frequency || !form.z_real || !form.z_imag) {
+      setPrediction("All fields are required");
+      return;
+    }
+
+    try {
+      const res = await axios.post("http://127.0.0.1:8000/predict", {
+        frequency: parseFloat(form.frequency),
+        z_real: parseFloat(form.z_real),
+        z_imag: parseFloat(form.z_imag),
+      });
+      setPrediction(res.data.recommended_match_type);
+    } catch (err) {
+      console.error("Prediction error", err);
+      setPrediction("Error fetching prediction");
+    }
+  };
+
+  const handleSweep = async () => {
+    if (!form.frequency || !form.z_real || !form.z_imag) {
+      setSweepData([]);
+      return;
+    }
+
+    try {
+      const res = await axios.post("http://127.0.0.1:8000/sweep", {
+        frequency: parseFloat(form.frequency),
+        z_real: parseFloat(form.z_real),
+        z_imag: parseFloat(form.z_imag),
+      });
+      setSweepData(res.data.sweep);
+    } catch (err) {
+      console.error("Sweep error", err);
+      setSweepData([]);
     }
   };
 
@@ -70,9 +129,9 @@ export default function Home() {
 
   const generatePathD = () => {
     if (!gammaPath || gammaPath.length === 0) return "";
-    const cx = 200; // Center of the Smith chart (SVG coordinates)
+    const cx = 200;
     const cy = 200;
-    const r = 200; // Radius of the Smith chart
+    const r = 200;
 
     return gammaPath
       .map(([re, im], index) => {
@@ -84,12 +143,11 @@ export default function Home() {
   };
 
   const generateSmithChartGrid = () => {
-    const cx = 200; // Center of the Smith chart (SVG coordinates)
+    const cx = 200;
     const cy = 200;
-    const r = 200; // Radius of the Smith chart
+    const r = 200;
     const gridLines = [];
 
-    // Draw constant resistance circles
     const resistanceValues = [0.2, 0.5, 1, 2, 5];
     resistanceValues.forEach((rVal) => {
       const radius = (r / (1 + rVal)) * 2;
@@ -107,7 +165,6 @@ export default function Home() {
       );
     });
 
-    // Draw constant reactance arcs
     const reactanceValues = [0.2, 0.5, 1, 2, 5];
     reactanceValues.forEach((xVal) => {
       const radius = r / xVal;
@@ -129,7 +186,6 @@ export default function Home() {
         />
       );
 
-      // Negative reactance arcs
       gridLines.push(
         <path
           key={`x--${xVal}`}
@@ -172,6 +228,20 @@ export default function Home() {
         >
           Match
         </button>
+
+        <button
+          onClick={handleSweep}
+          className="w-full bg-purple-600 text-white font-bold px-4 py-2 rounded hover:bg-purple-700 transition duration-200 shadow-md mt-2"
+        >
+          Sweep Frequency
+        </button>
+
+        <button
+          onClick={handlePredict}
+          className="w-full bg-green-600 text-white font-bold px-4 py-2 rounded hover:bg-green-700 transition duration-200 shadow-md mt-2"
+        >
+          Predict Match Type
+        </button>
       </div>
 
       <div className="mt-10">
@@ -184,22 +254,9 @@ export default function Home() {
             className="w-full h-full border shadow-md rounded-full cursor-crosshair bg-white"
             onClick={handleChartClick}
           >
-            {/* Add the static Smith chart background image */}
-            <image
-              href="/smith-chart.png" // Correct path to the image in the public folder
-              x="0"
-              y="0"
-              width="400"
-              height="400"
-            />
-
-            {/* Draw the Smith chart grid */}
+            <image href="/smith-chart.png" x="0" y="0" width="400" height="400" />
             {generateSmithChartGrid()}
-
-            {/* Draw the gamma path */}
             <path d={generatePathD()} stroke="red" fill="none" strokeWidth="2" />
-
-            {/* Draw the outer circle */}
             <circle cx="200" cy="200" r="200" fill="none" stroke="black" strokeWidth="1" />
           </svg>
           {clickedPoint && (
@@ -244,6 +301,44 @@ export default function Home() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {sparams && (
+        <div className="mt-8 p-6 bg-white rounded-lg shadow-lg">
+          <h2 className="text-2xl font-bold text-blue-800 mb-4">S-Parameters</h2>
+          <div className="space-y-2 text-blue-900 text-sm">
+            <p><strong>S11:</strong> {sparams.S11[0]} + j{sparams.S11[1]}</p>
+            <p><strong>S21:</strong> {sparams.S21}</p>
+            <p><strong>S12:</strong> {sparams.S12}</p>
+            <p><strong>S22:</strong> {sparams.S22[0]} + j{sparams.S22[1]}</p>
+          </div>
+        </div>
+      )}
+
+      {prediction && (
+        <div className="mt-8 p-6 bg-white rounded-lg shadow-lg">
+          <h2 className="text-2xl font-bold text-green-800 mb-4">Prediction</h2>
+          <p className="text-green-700 text-lg">
+            Recommended Match Type: <strong>{prediction}</strong>
+          </p>
+        </div>
+      )}
+
+      {sweepData.length > 0 && (
+        <div className="mt-8 p-6 bg-white rounded-lg shadow-lg">
+          <h2 className="text-2xl font-bold text-blue-800 mb-4">
+            Reflection vs Frequency
+          </h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={sweepData}>
+              <CartesianGrid stroke="#ccc" />
+              <XAxis dataKey="frequency" label={{ value: "GHz", position: "insideBottomRight", offset: -5 }} />
+              <YAxis domain={[0, 1]} label={{ value: "|Γ|", angle: -90, position: "insideLeft" }} />
+              <Tooltip />
+              <Line type="monotone" dataKey="gamma_mag" stroke="#8884d8" dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
     </main>
